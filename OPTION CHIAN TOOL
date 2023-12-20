@@ -1,0 +1,83 @@
+import matplotlib.pyplot as plt
+import yfinance as yf
+import numpy as np
+import pandas as pd
+
+# Function to calculate historical volatility
+def historical_volatility(data, window=30):
+    log_returns = np.log(data / data.shift(1))
+    return log_returns.rolling(window=window).std() * np.sqrt(252)
+
+# Function to fetch available option expiration dates
+def get_option_expirations(ticker):
+    stock = yf.Ticker(ticker)
+    return stock.options
+
+# Function to get options data
+def get_options_data(ticker, expiration_date):
+    stock = yf.Ticker(ticker)
+    opts = stock.option_chain(expiration_date)
+    return opts.calls, opts.puts
+
+# Function to generate trading signals based on IV and HV
+def generate_trading_signals(options, hist_vol):
+    options['HistoricalVolatility'] = hist_vol
+    options['IV-HV Difference'] = options['impliedVolatility'] - hist_vol
+    options['Long Vol Signal'] = options['IV-HV Difference'].apply(lambda x: 'Long Vol' if x < 0 else 'Neutral')
+    options['Short Vol Signal'] = options['IV-HV Difference'].apply(lambda x: 'Short Vol' if x > 0 else 'Neutral')
+    return options
+
+# Function to plot volatility and signals
+def plot_volatility_and_signals(options, title):
+    plt.figure(figsize=(14, 7))
+
+    for index, row in options.iterrows():
+        if row['Long Vol Signal'] == 'Long Vol':
+            plt.scatter(row['strike'], row['impliedVolatility'], color='green', label='Long Vol' if index == 0 else "")
+        elif row['Short Vol Signal'] == 'Short Vol':
+            plt.scatter(row['strike'], row['impliedVolatility'], color='red', label='Short Vol' if index == 0 else "")
+        else:
+            plt.scatter(row['strike'], row['impliedVolatility'], color='blue', label='Neutral' if index == 0 else "")
+
+    plt.axhline(y=hist_vol, color='orange', linestyle='--', label='Historical Volatility')
+    plt.title(title)
+    plt.xlabel('Strike Price')
+    plt.ylabel('Implied Volatility')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+# Main function to plot volatility graphs with user inputs
+def plot_volatility():
+    global ticker, hist_vol
+    ticker = input('Ticker: ')
+    stock = yf.Ticker(ticker)
+    exp_dates = get_option_expirations(ticker)
+    print("Available Expiration Dates:", exp_dates)
+    expiration_date = input('Choose Option Expiration Date (YYYY-MM-DD): ')
+    start_date = input('Start Date for Historical Data (YYYY-MM-DD): ')
+    end_date = input('End Date for Historical Data (YYYY-MM-DD): ')
+
+    # Fetch historical data and calculate HV
+    data = yf.download(ticker, start=start_date, end=end_date)
+    hist_vol = historical_volatility(data['Close']).iloc[-1]
+
+    # Fetch options data
+    calls, puts = get_options_data(ticker, expiration_date)
+
+    # Generate trading signals for calls and puts
+    calls_with_signals = generate_trading_signals(calls, hist_vol)
+    puts_with_signals = generate_trading_signals(puts, hist_vol)
+
+    # Format and display the tables
+    pd.set_option('display.float_format', '{:.2f}'.format)
+    print("\n=== Call Options: IV vs. HV Comparison ===")
+    print(calls_with_signals[['strike', 'impliedVolatility', 'HistoricalVolatility', 'IV-HV Difference', 'Long Vol Signal', 'Short Vol Signal']])
+    print("\n=== Put Options: IV vs. HV Comparison ===")
+    print(puts_with_signals[['strike', 'impliedVolatility', 'HistoricalVolatility', 'IV-HV Difference', 'Long Vol Signal', 'Short Vol Signal']])
+
+    # Plot volatility and signals for calls and puts
+    plot_volatility_and_signals(calls_with_signals, f'Call Options: Implied Volatility vs. Historical Volatility for {ticker}')
+    plot_volatility_and_signals(puts_with_signals, f'Put Options: Implied Volatility vs. Historical Volatility for {ticker}')
+
+plot_volatility()
